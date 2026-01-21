@@ -1,12 +1,25 @@
 [project]
 name = "yt-obsidian"
 version = "0.1.0"
-description = "Add your description here"
+description = "YouTube to Obsidian converter with transcription"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "yt-dlp",
+  "pydub",
+  "python-dotenv",
+  "pyyaml",
+  "litellm",
+  "faster-whisper",
+  "librosa",
+  "numpy",
+  "soundfile",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
-hello = "yt_obsidian:main"
+transcribe = "yt_obsidian.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.0,<0.10.0"]
