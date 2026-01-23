@@ -61,7 +61,9 @@ def transcribe_with_diarization(audio_path: Path, model) -> List[Dict[str, Any]]
     return transcript_with_speakers
 
 
-def diarize_speakers(audio_path: Path, transcript: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def diarize_speakers(
+    audio_path: Path, transcript: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     audio = AudioSegment.from_wav(str(audio_path))
 
     speakers = ["Speaker A", "Speaker B", "Speaker C", "Speaker D"]
@@ -78,14 +80,16 @@ def diarize_speakers(audio_path: Path, transcript: List[Dict[str, Any]]) -> List
     return transcript
 
 
-def extract_metadata(video_info: Dict[str, Any], transcript: List[Dict[str, Any]]) -> Dict[str, Any]:
+def extract_metadata(
+    video_info: Dict[str, Any], transcript: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     transcript_text = "\n".join([f"{s['speaker']}: {s['text']}" for s in transcript])
     transcript_preview = transcript_text[:2000]
 
     prompt = f"""Analyze this YouTube video transcript and extract metadata in JSON format.
 
-Video Title: {video_info.get('title', 'N/A')}
-Video Description: {video_info.get('description', '')[:1000]}
+Video Title: {video_info.get("title", "N/A")}
+Video Description: {video_info.get("description", "")[:1000]}
 
 Transcript Preview:
 {transcript_preview}
@@ -147,6 +151,27 @@ def format_timestamp(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def update_speaker_names(
+    transcript: List[Dict[str, Any]], metadata: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    speakers = metadata.get("speakers", [])
+    if not speakers:
+        return transcript
+
+    generic_labels = ["Speaker A", "Speaker B", "Speaker C", "Speaker D"]
+    label_mapping = {}
+
+    for i, speaker_name in enumerate(speakers):
+        if i < len(generic_labels):
+            label_mapping[generic_labels[i]] = speaker_name
+
+    for segment in transcript:
+        if segment["speaker"] in label_mapping:
+            segment["speaker"] = label_mapping[segment["speaker"]]
+
+    return transcript
+
+
 def generate_markdown(
     metadata: Dict[str, Any], transcript: List[Dict[str, Any]], output_path: Path
 ) -> None:
@@ -161,7 +186,14 @@ def generate_markdown(
         else:
             frontmatter.append(f'{key}: "{value}"')
 
-    content = ["---", *frontmatter, "---", "", f"# {metadata.get('title', 'Untitled')}", ""]
+    content = [
+        "---",
+        *frontmatter,
+        "---",
+        "",
+        f"# {metadata.get('title', 'Untitled')}",
+        "",
+    ]
     content.append("## Summary")
     content.append(metadata.get("summary", ""))
     content.append("")
@@ -180,7 +212,9 @@ def generate_markdown(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Transcribe YouTube video and generate Obsidian markdown")
+    parser = argparse.ArgumentParser(
+        description="Transcribe YouTube video and generate Obsidian markdown"
+    )
     parser.add_argument("url", help="YouTube video URL")
     parser.add_argument("-o", "--output", help="Output markdown file path", type=Path)
     parser.add_argument(
@@ -205,7 +239,12 @@ def main():
         print("Extracting metadata with LLM...")
         metadata = extract_metadata(video_info, transcript)
 
-        output_path = args.output or Path(f"{metadata.get('title', 'transcript').replace(' ', '_')}.md")
+        print("Updating speaker names in transcript...")
+        transcript = update_speaker_names(transcript, metadata)
+
+        output_path = args.output or Path(
+            f"{metadata.get('title', 'transcript').replace(' ', '_')}.md"
+        )
 
         print("Generating markdown...")
         generate_markdown(metadata, transcript, output_path)
