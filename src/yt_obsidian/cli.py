@@ -277,38 +277,8 @@ def generate_markdown(
 
     content = ["---", yaml_frontmatter, "---", "", f"# {metadata.get('title', 'Untitled')}", ""]
 
-    if metadata.get("thumbnail_path") or metadata.get("thumbnail_url"):
-        content.append("## Thumbnail")
-        thumb_path = metadata.get("thumbnail_path")
-        thumb_url = metadata.get("thumbnail_url")
-        if thumb_path:
-            content.append(f"![]({thumb_path})")
-        elif thumb_url:
-            content.append(f"![]({thumb_url})")
-        content.append("")
-
     content.append("## Summary")
     content.append(metadata.get("summary", ""))
-    content.append("")
-
-    content.append("## Video Metadata")
-    video_lines = [
-        f"- Original URL: {metadata.get('original_url', '')}",
-        f"- Upload date: {metadata.get('upload_date', '')}",
-        f"- Channel: {metadata.get('channel', '')} ({metadata.get('channel_url', '')})",
-        f"- Uploader: {metadata.get('uploader', '')} ({metadata.get('uploader_id', '')})",
-        f"- Duration: {metadata.get('duration_minutes', 0)} minutes ({metadata.get('duration_seconds', 0)} seconds)",
-        f"- Views: {metadata.get('view_count', 0)} | Likes: {metadata.get('like_count', 0)}",
-    ]
-    if metadata.get("categories"):
-        video_lines.append(f"- Categories: {', '.join(metadata.get('categories', []))}")
-    if metadata.get("video_tags"):
-        video_lines.append(f"- Video tags: {', '.join(metadata.get('video_tags', []))}")
-    if metadata.get("description"):
-        video_lines.append("- Description:")
-        video_lines.append(metadata.get("description", ""))
-
-    content.extend(video_lines)
     content.append("")
 
     content.append("## Transcript")
