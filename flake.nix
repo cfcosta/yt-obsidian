@@ -199,9 +199,10 @@
           default = pkgs.mkShell {
             packages = [
               virtualenv
-              pkgs.uv
-              pkgs.sox
+              pkgs.deno
               pkgs.libgccjit
+              pkgs.sox
+              pkgs.uv
             ];
             env = {
               UV_NO_SYNC = "1";

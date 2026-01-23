@@ -108,14 +108,14 @@ def extract_video_metadata(video_info: Dict[str, Any]) -> Dict[str, Any]:
         "uploader": video_info.get("uploader", ""),
         "uploader_id": video_info.get("uploader_id", ""),
         "channel": video_info.get("channel") or video_info.get("uploader", ""),
-        "channel_url": video_info.get("channel_url") or video_info.get("uploader_url", ""),
+        "channel_url": video_info.get("channel_url")
+        or video_info.get("uploader_url", ""),
         "duration_seconds": duration_seconds,
         "duration_minutes": round(duration_seconds / 60, 2) if duration_seconds else 0,
         "view_count": video_info.get("view_count", 0),
         "like_count": video_info.get("like_count", 0),
         "categories": video_info.get("categories") or [],
         "video_tags": video_info.get("tags") or [],
-        "description": (video_info.get("description") or "").strip(),
         "thumbnail_url": select_best_thumbnail(video_info),
     }
 
@@ -200,7 +200,8 @@ Return JSON only, no other text."""
                 "tags": video_info.get("tags") or ["video", "youtube"],
                 "category": "General",
                 "key_topics": [],
-                "speakers": list({s.get("speaker", "Speaker A") for s in transcript}) or ["Speaker A"],
+                "speakers": list({s.get("speaker", "Speaker A") for s in transcript})
+                or ["Speaker A"],
                 "duration": round(video_info.get("duration", 0) / 60, 2),
                 "language": "en",
                 "difficulty_level": "Intermediate",
@@ -296,7 +297,14 @@ def generate_markdown(
         _yamlable(metadata), sort_keys=False, allow_unicode=False
     ).strip()
 
-    content = ["---", yaml_frontmatter, "---", "", f"# {metadata.get('title', 'Untitled')}", ""]
+    content = [
+        "---",
+        yaml_frontmatter,
+        "---",
+        "",
+        f"# {metadata.get('title', 'Untitled')}",
+        "",
+    ]
 
     content.append("## Summary")
     content.append(metadata.get("summary", ""))
