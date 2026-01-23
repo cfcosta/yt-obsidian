@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Any
@@ -136,6 +137,34 @@ Return JSON only, no other text."""
     return metadata
 
 
+def sanitize_filename_component(text: str) -> str:
+    """Create a bash-friendly slug from a filename component."""
+    text = text.replace(" ", "-")
+    text = re.sub(r"[^A-Za-z0-9._-]", "", text)
+    text = re.sub(r"-{2,}", "-", text)
+    text = text.strip("-_.")
+    return text or "untitled"
+
+
+def build_base_filename(
+    video_info: Dict[str, Any], metadata: Dict[str, Any] | None = None
+) -> str:
+    """Combine channel and title into a sanitized base filename."""
+    channel = video_info.get("channel") or video_info.get("uploader") or "channel"
+    title = (
+        (metadata or {}).get("title")
+        or video_info.get("title")
+        or video_info.get("fulltitle")
+        or "untitled"
+    )
+
+    channel_slug = sanitize_filename_component(channel)
+    title_slug = sanitize_filename_component(title)
+
+    parts = [p for p in (channel_slug, title_slug) if p]
+    return "-".join(parts) if parts else "untitled"
+
+
 def format_timestamp(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -221,6 +250,11 @@ def main():
 
         print("Downloading audio...")
         audio_path, video_info = download_audio(args.url, tmpdir_path)
+        audio_base_name = build_base_filename(video_info)
+        sanitized_audio_path = tmpdir_path / f"{audio_base_name}{audio_path.suffix}"
+        if sanitized_audio_path != audio_path:
+            audio_path.rename(sanitized_audio_path)
+            audio_path = sanitized_audio_path
         print(f"Audio downloaded to: {audio_path}")
 
         print("Loading Whisper model...")
@@ -236,9 +270,8 @@ def main():
         print("Updating speaker names in transcript...")
         transcript = update_speaker_names(transcript, metadata)
 
-        output_path = args.output or Path(
-            f"{metadata.get('title', 'transcript').replace(' ', '_')}.md"
-        )
+        default_output = Path(f"{build_base_filename(video_info, metadata)}.md")
+        output_path = args.output or default_output
 
         print("Generating markdown...")
         generate_markdown(metadata, transcript, output_path)
