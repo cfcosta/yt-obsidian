@@ -2,9 +2,7 @@ import argparse
 import json
 import re
 import tempfile
-import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
 from typing import Dict, List, Any
 
 import yaml
@@ -122,42 +120,51 @@ def extract_video_metadata(video_info: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def download_thumbnail(thumbnail_url: str, output_path: Path) -> Path | None:
-    if not thumbnail_url:
-        return None
-
-    try:
-        suffix = Path(urlsplit(thumbnail_url).path).suffix or ".jpg"
-    except Exception:
-        suffix = ".jpg"
-
-    thumbnail_path = output_path.with_name(f"{output_path.stem}-thumb{suffix}")
-
-    try:
-        with urllib.request.urlopen(thumbnail_url) as response:
-            thumbnail_path.write_bytes(response.read())
-        return thumbnail_path
-    except Exception:
-        return None
-
-
 def extract_metadata(
     video_info: Dict[str, Any], transcript: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
+    def build_quick_summary() -> str:
+        if not transcript:
+            return "Summary not available"
+        chunks = []
+        total_len = 0
+        for seg in transcript:
+            text = seg.get("text", "").strip()
+            if not text:
+                continue
+            chunks.append(text)
+            total_len += len(text)
+            if total_len > 400:
+                break
+        quick = " ".join(chunks).strip()
+        return quick[:400] or "Summary not available"
+
+    def first_json_block(text: str) -> str | None:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return text[start : end + 1]
+        return None
+
     transcript_text = "\n".join([f"{s['speaker']}: {s['text']}" for s in transcript])
     transcript_preview = transcript_text[:2000]
 
-    prompt = f"""Analyze this YouTube video transcript and extract metadata in JSON format.
+    prompt = f"""Analyze this YouTube video using the transcript, title, description, and thumbnail URL.
 
 Video Title: {video_info.get("title", "N/A")}
 Video Description: {video_info.get("description", "")[:1000]}
+Thumbnail URL: {select_best_thumbnail(video_info)}
+Upload Date: {format_upload_date(video_info.get("upload_date"))}
+Channel: {video_info.get("channel") or video_info.get("uploader", "N/A")}
+Duration (seconds): {video_info.get("duration", 0)}
+Views: {video_info.get("view_count", 0)}, Likes: {video_info.get("like_count", 0)}
 
 Transcript Preview:
 {transcript_preview}
 
 Extract and return ONLY a JSON object with these exact keys:
 - title: Main topic/title summary
-- summary: Brief 2-3 sentence summary
+- summary: Brief 2-3 sentence summary (use transcript and thumbnail; do NOT say 'not available')
 - tags: List of 5-10 relevant tags
 - category: Content category (e.g., Tutorial, Interview, Lecture)
 - key_topics: List of main topics discussed
@@ -174,19 +181,33 @@ Return JSON only, no other text."""
     )
 
     try:
-        metadata = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        metadata = json.loads(content)
     except json.JSONDecodeError:
-        metadata = {
-            "title": video_info.get("title", "Untitled"),
-            "summary": "Summary not available",
-            "tags": ["video", "youtube"],
-            "category": "General",
-            "key_topics": [],
-            "speakers": ["Speaker A"],
-            "duration": round(video_info.get("duration", 0) / 60, 2),
-            "language": "en",
-            "difficulty_level": "Intermediate",
-        }
+        fallback = first_json_block(response.choices[0].message.content)
+        if fallback:
+            try:
+                metadata = json.loads(fallback)
+            except json.JSONDecodeError:
+                metadata = None
+        else:
+            metadata = None
+
+        if metadata is None:
+            metadata = {
+                "title": video_info.get("title", "Untitled"),
+                "summary": build_quick_summary(),
+                "tags": video_info.get("tags") or ["video", "youtube"],
+                "category": "General",
+                "key_topics": [],
+                "speakers": list({s.get("speaker", "Speaker A") for s in transcript}) or ["Speaker A"],
+                "duration": round(video_info.get("duration", 0) / 60, 2),
+                "language": "en",
+                "difficulty_level": "Intermediate",
+            }
+    # Ensure summary is populated even if model omitted it
+    if not metadata.get("summary"):
+        metadata["summary"] = build_quick_summary()
 
     metadata.update(
         {
@@ -335,11 +356,6 @@ def main():
         default_output = Path(f"{build_base_filename(video_info, metadata)}.md")
         output_path = args.output or default_output
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        print("Downloading thumbnail...")
-        thumbnail_path = download_thumbnail(metadata.get("thumbnail_url", ""), output_path)
-        if thumbnail_path:
-            metadata["thumbnail_path"] = thumbnail_path.name
 
         print("Generating markdown...")
         generate_markdown(metadata, transcript, output_path)
