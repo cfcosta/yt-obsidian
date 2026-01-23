@@ -2,8 +2,12 @@ import argparse
 import json
 import re
 import tempfile
+import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Dict, List, Any
+
+import yaml
 
 import yt_dlp
 from dotenv import load_dotenv
@@ -75,6 +79,66 @@ def diarize_speakers(
         segment["speaker"] = speakers[current_speaker]
 
     return transcript
+
+
+def format_upload_date(date_str: str | None) -> str:
+    if not date_str:
+        return ""
+    if isinstance(date_str, (int, float)):
+        date_str = str(date_str)
+    if len(date_str) == 8 and date_str.isdigit():
+        return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+    return str(date_str)
+
+
+def select_best_thumbnail(video_info: Dict[str, Any]) -> str:
+    thumbnails = video_info.get("thumbnails") or []
+    if thumbnails:
+        best = max(
+            thumbnails,
+            key=lambda t: (t.get("width") or 0) * (t.get("height") or 0),
+        )
+        return best.get("url") or ""
+    return video_info.get("thumbnail", "")
+
+
+def extract_video_metadata(video_info: Dict[str, Any]) -> Dict[str, Any]:
+    duration_seconds = video_info.get("duration") or 0
+    return {
+        "original_url": video_info.get("webpage_url", ""),
+        "upload_date": format_upload_date(video_info.get("upload_date")),
+        "uploader": video_info.get("uploader", ""),
+        "uploader_id": video_info.get("uploader_id", ""),
+        "channel": video_info.get("channel") or video_info.get("uploader", ""),
+        "channel_url": video_info.get("channel_url") or video_info.get("uploader_url", ""),
+        "duration_seconds": duration_seconds,
+        "duration_minutes": round(duration_seconds / 60, 2) if duration_seconds else 0,
+        "view_count": video_info.get("view_count", 0),
+        "like_count": video_info.get("like_count", 0),
+        "categories": video_info.get("categories") or [],
+        "video_tags": video_info.get("tags") or [],
+        "description": (video_info.get("description") or "").strip(),
+        "thumbnail_url": select_best_thumbnail(video_info),
+    }
+
+
+def download_thumbnail(thumbnail_url: str, output_path: Path) -> Path | None:
+    if not thumbnail_url:
+        return None
+
+    try:
+        suffix = Path(urlsplit(thumbnail_url).path).suffix or ".jpg"
+    except Exception:
+        suffix = ".jpg"
+
+    thumbnail_path = output_path.with_name(f"{output_path.stem}-thumb{suffix}")
+
+    try:
+        with urllib.request.urlopen(thumbnail_url) as response:
+            thumbnail_path.write_bytes(response.read())
+        return thumbnail_path
+    except Exception:
+        return None
 
 
 def extract_metadata(
@@ -198,27 +262,53 @@ def update_speaker_names(
 def generate_markdown(
     metadata: Dict[str, Any], transcript: List[Dict[str, Any]], output_path: Path
 ) -> None:
-    frontmatter = []
-    for key, value in metadata.items():
+    def _yamlable(value: Any):
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {k: _yamlable(v) for k, v in value.items()}
         if isinstance(value, list):
-            frontmatter.append(f"{key}:")
-            for item in value:
-                frontmatter.append(f"  - {item}")
-        elif isinstance(value, (int, float)):
-            frontmatter.append(f"{key}: {value}")
-        else:
-            frontmatter.append(f'{key}: "{value}"')
+            return [_yamlable(v) for v in value]
+        return value
 
-    content = [
-        "---",
-        *frontmatter,
-        "---",
-        "",
-        f"# {metadata.get('title', 'Untitled')}",
-        "",
-    ]
+    yaml_frontmatter = yaml.safe_dump(
+        _yamlable(metadata), sort_keys=False, allow_unicode=False
+    ).strip()
+
+    content = ["---", yaml_frontmatter, "---", "", f"# {metadata.get('title', 'Untitled')}", ""]
+
+    if metadata.get("thumbnail_path") or metadata.get("thumbnail_url"):
+        content.append("## Thumbnail")
+        thumb_path = metadata.get("thumbnail_path")
+        thumb_url = metadata.get("thumbnail_url")
+        if thumb_path:
+            content.append(f"![]({thumb_path})")
+        elif thumb_url:
+            content.append(f"![]({thumb_url})")
+        content.append("")
+
     content.append("## Summary")
     content.append(metadata.get("summary", ""))
+    content.append("")
+
+    content.append("## Video Metadata")
+    video_lines = [
+        f"- Original URL: {metadata.get('original_url', '')}",
+        f"- Upload date: {metadata.get('upload_date', '')}",
+        f"- Channel: {metadata.get('channel', '')} ({metadata.get('channel_url', '')})",
+        f"- Uploader: {metadata.get('uploader', '')} ({metadata.get('uploader_id', '')})",
+        f"- Duration: {metadata.get('duration_minutes', 0)} minutes ({metadata.get('duration_seconds', 0)} seconds)",
+        f"- Views: {metadata.get('view_count', 0)} | Likes: {metadata.get('like_count', 0)}",
+    ]
+    if metadata.get("categories"):
+        video_lines.append(f"- Categories: {', '.join(metadata.get('categories', []))}")
+    if metadata.get("video_tags"):
+        video_lines.append(f"- Video tags: {', '.join(metadata.get('video_tags', []))}")
+    if metadata.get("description"):
+        video_lines.append("- Description:")
+        video_lines.append(metadata.get("description", ""))
+
+    content.extend(video_lines)
     content.append("")
 
     content.append("## Transcript")
@@ -266,12 +356,20 @@ def main():
 
         print("Extracting metadata with LLM...")
         metadata = extract_metadata(video_info, transcript)
+        video_metadata = extract_video_metadata(video_info)
+        metadata.update(video_metadata)
 
         print("Updating speaker names in transcript...")
         transcript = update_speaker_names(transcript, metadata)
 
         default_output = Path(f"{build_base_filename(video_info, metadata)}.md")
         output_path = args.output or default_output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        print("Downloading thumbnail...")
+        thumbnail_path = download_thumbnail(metadata.get("thumbnail_url", ""), output_path)
+        if thumbnail_path:
+            metadata["thumbnail_path"] = thumbnail_path.name
 
         print("Generating markdown...")
         generate_markdown(metadata, transcript, output_path)
