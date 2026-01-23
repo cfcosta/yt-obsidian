@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Any
@@ -10,9 +9,6 @@ from dotenv import load_dotenv
 from litellm import completion
 from pydub import AudioSegment
 from faster_whisper import WhisperModel
-import librosa
-import soundfile as sf
-import numpy as np
 
 load_dotenv()
 
@@ -108,10 +104,8 @@ Extract and return ONLY a JSON object with these exact keys:
 Return JSON only, no other text."""
 
     response = completion(
-        model="openrouter/anthropic/claude-3.5-sonnet",
+        model="openrouter/minimax/minimax-m2.1",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        api_key=os.getenv("OPENROUTER_API_KEY"),
     )
 
     try:
