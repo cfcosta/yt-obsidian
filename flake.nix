@@ -176,7 +176,6 @@
             ]
           )
       );
-
     in
     {
       devShells = forAllSystems (
@@ -185,6 +184,16 @@
           pkgs = import nixpkgs {
             inherit system;
             config.allowUnfree = true;
+          };
+
+          cuda = pkgs.symlinkJoin {
+            name = "cuda-redist";
+            paths = with pkgs.cudaPackages; [
+              cuda_cudart
+              cuda_nvcc
+              cudnn
+              pkgs.cudatoolkit
+            ];
           };
 
           pythonSet = pythonSets.${system}.overrideScope (
@@ -204,15 +213,19 @@
               pkgs.sox
               pkgs.uv
             ];
+
             env = {
               UV_NO_SYNC = "1";
               UV_PYTHON = pythonSet.python.interpreter;
               UV_PYTHON_DOWNLOADS = "never";
-              LD_LIBRARY_PATH = "/usr/lib64:/usr/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH";
+              CUDA_HOME = if pkgs.stdenv.isLinux then "${cuda}" else "";
+              CUDA_PATH = if pkgs.stdenv.isLinux then "${cuda}" else "";
             };
+
             shellHook = ''
               unset PYTHONPATH
               export REPO_ROOT=$(git rev-parse --show-toplevel)
+              export LD_LIBRARY_PATH=${cuda}/lib64:${cuda}/lib:$LD_LIBRARY_PATH
             '';
           };
         }
